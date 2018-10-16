@@ -61,6 +61,12 @@
 #include "server.h"
 #include "bio.h"
 
+#ifdef USE_NVM
+#include "nvm.h"
+#include "sds.h"
+#include "libpmem.h"
+#endif
+
 static pthread_t bio_threads[BIO_NUM_OPS];
 static pthread_mutex_t bio_mutex[BIO_NUM_OPS];
 static pthread_cond_t bio_newjob_cond[BIO_NUM_OPS];
@@ -142,6 +148,118 @@ void bioCreateBackgroundJob(int type, void *arg1, void *arg2, void *arg3) {
     pthread_mutex_unlock(&bio_mutex[type]);
 }
 
+
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+/*
+addr: is the adress that need to duplciate.
+nvmsize: the size that need allocate from the NVM
+dupsize:the size that really need to copy from the address
+In most casese: the totalsize=duplicatesize; for sds, since sds have some room for later use, so totalsize!=dupsize
+*/
+void* duplicateDatatoNvm(struct dataMovetoPmem *movejob, void *addr,size_t nvmsize,size_t dupsize) 
+{
+    void * nvmaddr;
+    void * dramaddr;
+    // if the addr that need duplciate already in NVM, return 
+    if(is_nvm_addr(addr)) {
+        return NULL;
+    }
+    void* new_sh = nvm_malloc(nvmsize);
+    //size_t used_nvm=nvm_get_used();
+    //printf("getusednvm...=%ld\n",used_nvm);
+    if(!new_sh)
+    {
+        return NULL;
+    }
+    int cnt=dupsize>>10;
+    int leftsize=dupsize & 1023;
+    
+    nvmaddr=new_sh;
+    dramaddr=addr;
+    //can optimize address 128 alignment
+    while (cnt>0) {
+        if(movejob->dataflag==1) {
+            nvm_free(new_sh);
+            return NULL;
+        }
+        pmem_memcpy_persist(nvmaddr, dramaddr, 1024);
+        cnt--;
+        nvmaddr+=1024;
+        dramaddr+=1024;
+    }
+    if (leftsize>0) {
+        if(movejob->dataflag==1) {
+            nvm_free(new_sh);
+            return NULL;
+        }
+        pmem_memcpy_persist(nvmaddr, dramaddr, leftsize);
+    }
+    return new_sh;
+}
+
+
+void moveEntrytoNvm(struct dataMovetoPmem * movejob) 
+{
+    pthread_mutex_lock(&movejob->pmemMutex);
+    if(movejob->dataflag==1) {
+        movejob->entry=NULL; //done
+        pthread_mutex_unlock(&movejob->pmemMutex);
+        return;
+    }
+    dictEntry * entry=movejob->entry;
+    robj * val=entry->v.val;
+    
+    if(entry && val) 
+    {   
+        if(val->type==OBJ_STRING && val->encoding==OBJ_ENCODING_RAW)
+        {
+            sds myval =val->ptr; //sds of the value
+            size_t header_size = sdsheadersize(myval);
+            size_t total_size = header_size + sdsalloc(myval) + 1;
+            void* sh = myval - header_size;
+            size_t used_size = header_size + sdslen(myval) + 1; //only need copy this size
+            void *new_nvm=duplicateDatatoNvm(movejob, sh, total_size, used_size);    
+            if(new_nvm!=NULL)
+            {
+                zfree(sh);
+                val->ptr=(char*)new_nvm + header_size;
+            }
+        }
+        else if (val->type==OBJ_LIST && val->encoding == OBJ_ENCODING_QUICKLIST)
+        {
+            quicklist * ql=val->ptr;
+            quicklistNode * qln=ql->head;
+            unsigned int nodecount =ql->len;
+            unsigned int qlnsize=qln->sz;
+            unsigned int i;
+            void *new_nvm;
+            //printf("BIO process the entry=%p\n",movejob->entry);
+            for(i=0;i<nodecount;i++) 
+            {
+                new_nvm=duplicateDatatoNvm(movejob, qln->zl, qlnsize, qlnsize);
+                if(new_nvm!=NULL) 
+                {
+                    zfree(qln->zl);
+                    qln->zl=new_nvm;
+                } 
+                else if(movejob->dataflag==1)
+                {
+                    break;
+                }
+                qln=qln->next;
+            }
+        }
+        else if (val->type == OBJ_SET)
+        {
+        }
+    }   
+    movejob->entry=NULL; //done 
+    pthread_mutex_unlock(&movejob->pmemMutex);
+}
+#endif
+
+
 void *bioProcessBackgroundJobs(void *arg) {
     struct bio_job *job;
     unsigned long type = (unsigned long) arg;
@@ -210,6 +328,17 @@ void *bioProcessBackgroundJobs(void *arg) {
                 exit(1);
             }
             zfree(aofguard);
+        }
+#endif
+
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+        else if(type == BIO_LAZY_MOVE) 
+        {
+            struct dataMovetoPmem * movejob=job->arg1;
+            /*real work here*/
+            moveEntrytoNvm(movejob);
+            
         }
 #endif
         else {

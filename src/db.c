@@ -47,6 +47,17 @@ robj *lookupKey(redisDb *db, robj *key, int flags) {
     if (de) {
         robj *val = dictGetVal(de);
 
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+        int i;
+        if((i=checkInPmemMoveJob(de))!=-1) {
+            //raise a flag to cancel BIO job
+            server.dataMoveJob[i].dataflag = 1;
+            pthread_mutex_lock(&server.dataMoveJob[i].pmemMutex);   
+            pthread_mutex_unlock(&server.dataMoveJob[i].pmemMutex);     
+        }
+#endif
+
         /* Update the access time for the ageing algorithm.
          * Don't do it if we have a saving child, as this will trigger
          * a copy on write madness. */

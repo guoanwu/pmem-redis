@@ -743,8 +743,7 @@ void loadServerConfigFromString(char *config) {
 
             size <<= 30;
             server.nvm_size = size;
-        }
-        else if(!strcasecmp(argv[0], "nvm-dir")) {
+        } else if(!strcasecmp(argv[0], "nvm-dir")) {
             if(argc != 2){
                 err = "--nvm-dir <device>";
                 goto loaderr;
@@ -755,8 +754,7 @@ void loadServerConfigFromString(char *config) {
                 err = "Please identify nvm-maxcapacity before set nvm-dir device!";
                 goto loaderr;
             }
-        }
-        else if(!strcasecmp(argv[0], "nvm-threshold")) {
+        }else if(!strcasecmp(argv[0], "nvm-threshold")) {
             if(argc != 2) {
                 err = "--nvm-threshold <sds_length>";
                 goto loaderr;
@@ -765,19 +763,33 @@ void loadServerConfigFromString(char *config) {
                 err = "wrong <sds_length> in --nvm-threshold";
                 goto loaderr;
             }
+            if(server.dram_first==1) {
+                server.sdsmv_threshold=0xffffffff;
+            }
         }
-#endif
+        else if (!strcasecmp(argv[0],"dram-first") && argc == 2) {
+            if ((server.dram_first = yesnotoi(argv[1])) == -1) {
+                err = "argument must be 'yes' or 'no'"; goto loaderr;
+            }
+            server.sdsmv_threshold = 0xffffffff;  //set the sdsmv_threshold to big value and will not move at command
+        }
+        /*else if (!strcasecmp(argv[0],"dram-threshold-move") && argc == 2) {
+            server.dram_threshold_move = atoi(argv[1]);
+            if (server.dram_threshold_move < 0 ||
+                server.dram_threshold_move > 100){
+                err = "Invalid dram-threshold-move paramater"; goto loaderr;
+            }
+        }*/
 
 #ifdef SUPPORT_PBA
-        else if(strcasecmp(argv[0], "pointer-based-aof") == 0)
-        {
-            if(argc != 2)
-            {
+        else if(strcasecmp(argv[0], "pointer-based-aof") == 0)  {
+            if(argc != 2)  {
                 err = "--pointer-based-aof <yes or no>";
                 goto loaderr;
             }
             server.pba.enable = strcasecmp(argv[1], "yes") == 0;
         }
+#endif
 #endif
 
          else {

@@ -998,6 +998,12 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
 
     /* Sample the RSS here since this is a relatively slow call. */
     server.resident_set_size = zmalloc_get_rss();
+#ifdef USE_NVM
+    server.nvm_rss = nvm_get_rss();
+    if (server.dram_first==1) {
+        createMoveToNvmJob(MAX_PMEM_MOVE_JOB);
+    }
+#endif
 
     /* We received a SIGTERM, shutting down here in a safe way, as it is
      * not ok doing so inside the signal handler. */
@@ -1364,6 +1370,16 @@ void initServerConfig(void) {
     pthread_mutex_init(&server.next_client_id_mutex,NULL);
     pthread_mutex_init(&server.lruclock_mutex,NULL);
     pthread_mutex_init(&server.unixtime_mutex,NULL);
+
+#ifdef USE_NVM
+//#ifdef DRAM_FRIST
+    for (j=0;j<MAX_PMEM_MOVE_JOB;j++)
+    {
+        server.dataMoveJob[j].entry=NULL;
+        pthread_mutex_init(&server.dataMoveJob[j].pmemMutex,NULL);
+        server.dataMoveJob[j].dataflag=0;
+    }
+#endif
 
     getRandomHexChars(server.runid,CONFIG_RUN_ID_SIZE);
     server.runid[CONFIG_RUN_ID_SIZE] = '\0';
@@ -2405,6 +2421,71 @@ void call(client *c, int flags) {
     server.stat_numcommands++;
 }
 
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+int checkInPmemMoveJob(dictEntry * de) {
+    int i;
+    int flag=-1;
+    for (i=0;i<MAX_PMEM_MOVE_JOB;i++) {
+        if(de==server.dataMoveJob[i].entry) {
+            flag=i;
+            break;
+        }
+    }
+    return flag;
+}
+
+int freespaceInPmemMoveJob() {
+    int flag=-1;
+    int i;
+    for(i=0;i<MAX_PMEM_MOVE_JOB;i++) {
+        if(server.dataMoveJob[i].entry==NULL) {
+            flag=i;
+            break;
+        }
+    }
+    return flag;
+}
+
+//jobnums that we will create. 
+//jobnums must less than the 
+void createMoveToNvmJob(int jobNums) {
+    int j,i,k,l,m;
+    static int next_db = 0;
+    //sds bestkey = NULL;
+    //int bestdbid;
+    redisDb *db;
+    dict *dict;
+    dictEntry *de=NULL;
+    if(jobNums >MAX_PMEM_MOVE_JOB)
+        jobNums=MAX_PMEM_MOVE_JOB; 
+    //policy to select several key/values
+    /* When evicting a random key, we try to evict a key for
+    * each DB, so we use the static 'next_db' variable to
+    * incrementally visit all DBs. */
+    for(m=0;m<jobNums;m++) {
+        i=freespaceInPmemMoveJob();
+        if(i!=-1) {
+            for (k = 0; k < server.dbnum; k++)  {
+                l = (++next_db) % server.dbnum;
+                db = server.db+l;
+                dict = db->dict;
+                if (dictSize(dict) != 0) {
+                    de = dictGetRandomKey(dict);
+                    break;
+                }
+            }
+            j=checkInPmemMoveJob(de); //-1,not in the job list
+            if(j==-1 && de!=NULL) {
+                server.dataMoveJob[i].entry=de;
+                server.dataMoveJob[i].dataflag=0;
+                bioCreateBackgroundJob(BIO_LAZY_MOVE, &server.dataMoveJob[i], NULL, NULL);
+            }
+        }
+    }
+}
+#endif
+
 /* If this function gets called we already read a whole
  * command, arguments are in the client argv/argc fields.
  * processCommand() execute the command or prepare the
@@ -2473,6 +2554,12 @@ int processCommand(client *c) {
             return C_OK;
         }
     }
+
+#ifdef USE_NVM
+    if (server.dram_first==1) {
+        createMoveToNvmJob(1);
+    }
+#endif
 
     /* Handle the maxmemory directive.
      *
@@ -3147,9 +3234,9 @@ sds genRedisInfoString(char *section) {
             "rdb_current_bgsave_time_sec:%jd\r\n"
             "rdb_last_cow_size:%zu\r\n"
 #ifdef AEP_COW            
-	    "rdb_last_nvm_cow_size:%zu\r\n"
+        "rdb_last_nvm_cow_size:%zu\r\n"
 #endif            
-	    "aof_enabled:%d\r\n"
+        "aof_enabled:%d\r\n"
             "aof_rewrite_in_progress:%d\r\n"
             "aof_rewrite_scheduled:%d\r\n"
             "aof_last_rewrite_time_sec:%jd\r\n"
@@ -3167,9 +3254,9 @@ sds genRedisInfoString(char *section) {
                 -1 : time(NULL)-server.rdb_save_time_start),
             server.stat_rdb_cow_bytes,
 #ifdef AEP_COW      
-      	    server.last_nvm_cow_size,
+            server.last_nvm_cow_size,
 #endif            
-	    server.aof_state != AOF_OFF,
+        server.aof_state != AOF_OFF,
             server.aof_child_pid != -1,
             server.aof_rewrite_scheduled,
             (intmax_t)server.aof_rewrite_time_last,

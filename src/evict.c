@@ -410,7 +410,12 @@ int freeMemoryIfNeeded(void) {
     /* Check if we are over the memory usage limit. If we are not, no need
      * to subtract the slaves output buffers. We can just return ASAP. */
     mem_reported = zmalloc_used_memory();
-    if (mem_reported <= server.maxmemory) return C_OK;
+#ifdef USE_NVM
+    if (mem_reported <= server.maxmemory || server.nvm_rss < (server.nvm_size - (1024*1024*100)) )
+        return C_OK;
+#else
+    if (mem_reported <= server.maxmemory ) return C_OK;
+#endif
 
     /* Remove the size of slaves output buffers and AOF buffer from the
      * count of used memory. */
