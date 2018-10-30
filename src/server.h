@@ -907,6 +907,17 @@ struct clusterState;
 #define CHILD_INFO_TYPE_RDB 0
 #define CHILD_INFO_TYPE_AOF 1
 
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+#define MAX_PMEM_MOVE_JOB 2 
+struct dataMovetoPmem{
+    dictEntry * entry; //which contain the key and value; if null, init state
+    pthread_mutex_t pmemMutex; //mutex to protect the data between main thread and BIO
+    int dataflag; // flag to indictate the state; dataflag=0, init stat/on-going 
+                  // ;dataflag=1 main thread need to update, bio check this flag (job done) and release pmem-mutex.
+};
+#endif
+
 struct redisServer {
     /* General */
     pid_t pid;                  /* Main process pid. */
@@ -1241,9 +1252,18 @@ struct redisServer {
     pthread_mutex_t unixtime_mutex;
 
 #ifdef USE_NVM
+//#ifdef DRAM_FIRST
+    //maximum job that we would have in the BIO thread to move key/value to NVM.
+    struct dataMovetoPmem dataMoveJob[MAX_PMEM_MOVE_JOB];
+    int dram_first;
+    int dram_threshold_move;
+#endif  
+
+#ifdef USE_NVM
     char* nvm_dir;
     char* nvm_base;
     size_t nvm_size;
+    size_t nvm_rss;
     struct memkind *pmem_kind;
     size_t sdsmv_threshold;
 #endif
@@ -1406,6 +1426,12 @@ extern dictType modulesDictType;
  *----------------------------------------------------------------------------*/
 #ifdef AEP_COW
 void * redisduplicatenvmaddr(void *addr);
+#endif
+
+#ifdef USE_NVM
+int checkInPmemMoveJob(dictEntry * de);
+int freespaceInPmemMoveJob() ;
+void createMoveToNvmJob(int jobNums);
 #endif
 
 /* Modules */

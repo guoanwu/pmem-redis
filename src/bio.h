@@ -40,9 +40,14 @@ void bioKillThreads(void);
 #define BIO_AOF_FSYNC     1 /* Deferred AOF fsync. */
 #define BIO_LAZY_FREE     2 /* Deferred objects freeing. */
 
+
 #ifdef USE_AOFGUARD
 #define BIO_DEINIT_AOFGUARD 3
-#define BIO_NUM_OPS         4
-#else
-#define BIO_NUM_OPS       3
 #endif
+
+#ifdef USE_NVM
+//#ifdef DRAM_FIRST
+#define BIO_LAZY_MOVE     4 /* moved some key/values to the AEPs*/
+#endif
+
+#define BIO_NUM_OPS 5
