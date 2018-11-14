@@ -444,11 +444,21 @@ ssize_t rdbSaveLongLongAsStringObject(rio *rdb, long long value) {
 int rdbSaveStringObject(rio *rdb, robj *obj) {
     /* Avoid to decode the object, then encode it again, if the
      * object is already integer encoded. */
+    int ret;
     if (obj->encoding == OBJ_ENCODING_INT) {
         return rdbSaveLongLongAsStringObject(rdb,(long)obj->ptr);
     } else {
         serverAssertWithInfo(NULL,obj,sdsEncodedObject(obj));
-        return rdbSaveRawString(rdb,obj->ptr,sdslen(obj->ptr));
+        ret = rdbSaveRawString(rdb,obj->ptr,sdslen(obj->ptr));
+#ifdef AEP_COW
+		if(is_nvm_addr(obj->ptr)) {
+            int hs=sdsheadersize(obj->ptr);
+            void *addr=(sds)obj->ptr - hs;
+            //fprintf(stdout,"headersize=%d, addr=%p\n",hs,addr);
+            writeaddress(server.sharememory, addr);	
+        }
+#endif
+        return ret;
     }
 }
 
@@ -1120,6 +1130,9 @@ int rdbSaveBackground(char *filename, rdbSaveInfo *rsi) {
     if ((childpid = fork()) == 0) {
         int retval;
 
+#ifdef AEP_COW
+		server.sharememory=creatsharememory();
+#endif
         /* Child */
         closeListeningSockets(0);
         redisSetProcTitle("redis-rdb-bgsave");

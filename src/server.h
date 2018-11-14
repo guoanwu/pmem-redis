@@ -1255,6 +1255,9 @@ struct redisServer {
     size_t cow_nvm_size;
     size_t cow_mem_size;
     size_t last_nvm_cow_size;   /*cow_nvm_size + cow_mem_size*/
+
+	void * sharememory;
+	
 #endif
 
 #ifdef SUPPORT_PBA

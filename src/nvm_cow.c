@@ -30,6 +30,7 @@
  */
 /***************************************************************************/
 #include "nvm_cow.h"
+#include "stdio.h"
 
 /*compare the two address*/
 static int dictAddrCompare(void *privdata, const void *addr1, const void * addr2) {
@@ -91,10 +92,96 @@ void * cow_createcownvmdict() {
  * implementations that should instead rely on lookupKeyRead(),
  * lookupKeyWrite() and lookupKeyReadWithFlags(). */
 void cow_addaddressindict(dict * dict, void *addr) {   
+    //fprintf(stdout,"cowaddaddr in dict=%p, addr=%p\n", dict, addr);
     dictAddRaw(dict, addr, NULL);
 }
 
 void cow_remaddressindict(dict *dict, void *addr) {
     dictDelete(dict,addr);
 }
+
+//called for both main and child process
+void * creatsharememory() {
+	int shmid;
+	void * shmptr;
+    shmid=shmget(SHARED_MEMORY_KEY, SHARED_BUF_SIZE, IPC_CREAT);
+    
+    if(shmid == -1)
+	{
+		fprintf(stderr, "error, get the share memory failed\n");
+		exit(1);
+	}
+	//printf("shmid=%d\n",shmid);
+    shmptr=shmat(shmid,0,0);
+    if(shmptr ==(void *)-1) {
+		fprintf(stderr, "shmat error\n");
+		exit(1);
+	}
+    //printf("shmptr=%p\n",shmptr);
+	*(int64_t *)shmptr=BUFFER_PTR_START;
+    *((int64_t *)shmptr+1)=BUFFER_PTR_START;
+    return shmptr;
+}
+
+// called by the main process
+void readandprocessaddress(void *shmptr,dict *newdict, dict * cowdict) {
+	int i=0;
+	int write_position;
+	int read_position;
+	int64_t * ptr;
+    void * addr;
+	
+    //position informaiton
+	write_position= *(int64_t *)shmptr;
+	read_position=*((int64_t *)shmptr+1);
+	int size=write_position-read_position;
+    //printf("read...., write position=%d, read_position=%d\n",write_position, read_position);
+	ptr=(int64_t *)shmptr+BUFFER_PTR_START;
+	for(i=0;i<size;i++) {
+		addr=(void *)(*(int64_t *)ptr);
+		if(!cow_isnvmaddrindict(cowdict,addr)) {
+			cow_addaddressindict(newdict,addr);
+            //fprintf(stdout, "add new dict address=%p\n",addr);
+		}else {
+            //fprintf(stdout, "free address=%p in cow dict=%p\n",addr,cowdict);
+            cow_remaddressindict(cowdict,addr);
+            zfree(addr);
+        }
+		ptr+=1;
+	}
+	
+    if(size !=0) {
+        read_position+=size;
+	    if(read_position == BUFFER_ENTRY_NUMBER) {
+		    //reset the postion to 2
+	        *(int64_t *)shmptr=BUFFER_PTR_START;
+            *((int64_t *)shmptr+1)=BUFFER_PTR_START;
+            //fprintf(stdout, "reset the write,read pos\n");	
+        } else {
+		    *((int64_t *)shmptr+1)=read_position;
+            //fprintf(stdout,"update the read pos=%d\n",read_position);
+	    }
+    }
+}
+
+// called by the forked child process
+void writeaddress(void * shmptr, void * addr) {
+	int write_position;
+	//position informaiton
+	write_position=*(int64_t*)shmptr;
+	
+    //if the postion reached to the end of the buffer, not write any more
+    //fprintf(stdout,"write addr=%p,writepositon=%d\n", addr,write_position);
+    if(write_position!=BUFFER_ENTRY_NUMBER) {
+		*((int64_t *)shmptr+write_position)=(int64_t )addr;
+        write_position++;
+        *(int64_t *)shmptr = write_position;
+	} else if(write_position == *((int64_t *)shmptr+1)) {
+		//reset the postion to 2
+	    *(int64_t *)shmptr=BUFFER_PTR_START;
+        *((int64_t *)shmptr+1)=BUFFER_PTR_START;
+        //printf("reset read,write pos\n");
+    }
+}
+
 

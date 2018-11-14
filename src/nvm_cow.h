@@ -32,9 +32,26 @@
 #include "stddef.h"
 #include "dict.h"
 #include "zmalloc.h"
+
+#include <sys/types.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#define SHARED_MEMORY_KEY 24
+#define BUFFER_ENTRY_NUMBER 10000
+#define BUFFER_PTR_START 2
+#define SHARED_BUF_SIZE (BUFFER_ENTRY_NUMBER<<3)
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+void * creatsharememory();
+// called by the main process
+void readandprocessaddress(void *shmptr,dict *newdict, dict * cowdict);
+
+// called by the forked child process
+void writeaddress(void * shmptr, void * addr);
+
 int cow_isnvmaddrindict(dict *dict, void * addr);
 void * cow_createforknvmdict();
 void * cow_createcownvmdict();

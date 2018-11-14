@@ -1032,6 +1032,9 @@ int serverCron(struct aeEventLoop *eventLoop, long long id, void *clientData) {
                 zmalloc_used_memory());
         }
     }
+#ifdef AEP_COW
+	readandprocessaddress(server.sharememory,server.forked_dict,server.cow_dict);	
+#endif	
 
     /* We need to do a few operations on clients asynchronously. */
     clientsCron();
@@ -1879,6 +1882,7 @@ void * redisduplicatenvmaddr(void *addr) {
     is_nvm_addr(addr) && !cow_isnvmaddrindict(server.forked_dict,addr)) {
         void * dupaddr=NULL;    
         size= jemk_malloc_usable_size(addr);
+        //fprintf(stdout, "duplicate address =%p\n", addr);
         dupaddr = nvm_malloc(size);
         if(!dupaddr) {
             dupaddr=zmalloc(size);  
@@ -1972,6 +1976,7 @@ void initServer(void) {
 #ifdef AEP_COW
     server.forked_dict = cow_createforknvmdict();
     server.cow_dict = cow_createcownvmdict();
+	server.sharememory = creatsharememory();
 #endif
 
     evictionPoolAlloc(); /* Initialize the LRU keys pool. */
@@ -2113,7 +2118,6 @@ void populateCommandTable(void) {
             }
             f++;
         }
-
         retval1 = dictAdd(server.commands, sdsnew(c->name), c);
         /* Populate an additional dictionary that will be unaffected
          * by rename-command statements in redis.conf. */
@@ -2494,6 +2498,10 @@ int processCommand(client *c) {
             return C_OK;
         }
     }
+
+#ifdef AEP_COW
+   readandprocessaddress(server.sharememory,server.forked_dict,server.cow_dict); 
+#endif
 
     /* Handle the maxmemory directive.
      *
