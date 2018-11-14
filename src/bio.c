@@ -159,8 +159,8 @@ In most casese: the totalsize=duplicatesize; for sds, since sds have some room f
 */
 void* duplicateDatatoNvm(struct dataMovetoPmem *movejob, void *addr,size_t nvmsize,size_t dupsize) 
 {
-    void * nvmaddr;
-    void * dramaddr;
+    char * nvmaddr;
+    char * dramaddr;
     // if the addr that need duplciate already in NVM, return 
     if(is_nvm_addr(addr)) {
         return NULL;
