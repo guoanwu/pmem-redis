@@ -48,7 +48,6 @@
 #include "sds.h"
 #include "sdsalloc.h"
 
-
 static inline int sdsHdrSize(char type) {
     switch(type&SDS_TYPE_MASK) {
         case SDS_TYPE_5:
@@ -82,26 +81,24 @@ static inline char sdsReqType(size_t string_size) {
 /*dennis update the function for the flush*/
 void s_memcpy(sds dest, const char * src, size_t len)
 {
-    memcpy(dest,src,len);
-
 #ifdef USE_NVM
-    size_t hdrsize=sdsHdrSize(dest[-1]);
-    void *ptr= dest-hdrsize;
-    if(is_nvm_addr(ptr))
+    if(is_nvm_addr(dest))
     {
-        pmem_flush(dest, len+hdrsize);
-        /*pmem_persist(dest, len+hdrsize);*/
-    }
+		pmem_memcpy_persist(dest, src, len);
+    } 
+	else
+    {
+		memcpy(dest,src,len);
+	}
+#else
+	memcpy(dest,src,len);
 #endif
+	
 }
 
 
 #ifdef USE_NVM
 
-size_t sdsheadersize(const sds s)
-{
-    return sdsHdrSize(s[-1]);
-}
 
 sds sdsmvtonvm(const sds s)
 {
@@ -299,9 +296,6 @@ sds sdsdup(const sds s) {
     return sdsnewlen(s, sdslen(s));
 }
 
-#ifdef FAST_SDSFREE
-static int header_size_array[] = {0, 1, 10, 3, 20, 5, 0, 0};
-#endif
 
 /* Free an sds string. No operation is performed if 's' is NULL. */
 void sdsfree(sds s) {
@@ -311,7 +305,7 @@ void sdsfree(sds s) {
     {
         struct free_list* node = zmalloc(sizeof(struct free_list));
         node->mstime = server.mstime;
-        node->ptr = (char*)s - sdsHdrSize(s[-1]);
+        node->ptr = (char*)s - sdsheadersize(s);
         node->next = 0;
         if(server.pba.free_head)
         {
@@ -328,17 +322,11 @@ void sdsfree(sds s) {
     }
 #endif
 
-#ifdef FAST_SDSFREE
-    if(is_nvm_addr(s))
-    {
-        int header_size = header_size_array[(size_t)s & 7];
-        serverAssert(header_size);
-        s_free((char*)s - header_size);
-        return;
-    }
-#endif
+    int header_size = header_size_array[(size_t)s & 7];
+    serverAssert(header_size);
+    s_free((char*)s - header_size);
+    return;
 
-    s_free((char*)s-sdsHdrSize(s[-1]));
 }
 
 /* Set the sds string length to the length as obtained with strlen(), so
@@ -379,7 +367,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
     void *sh, *newsh;
     size_t avail = sdsavail(s);
     size_t len, newlen;
-    char type, oldtype = s[-1] & SDS_TYPE_MASK;
+    char type, oldtype = sdstype(s);
     int hdrlen;
 
     /* Return ASAP if there is enough space left. */
@@ -437,7 +425,7 @@ sds sdsMakeRoomFor(sds s, size_t addlen) {
  * references must be substituted with the new pointer returned by the call. */
 sds sdsRemoveFreeSpace(sds s) {
     void *sh, *newsh;
-    char type, oldtype = s[-1] & SDS_TYPE_MASK;
+    char type, oldtype = sdstype(s);
     int hdrlen;
     size_t len = sdslen(s);
     sh = (char*)s-sdsHdrSize(oldtype);
@@ -478,13 +466,13 @@ sds sdsRemoveFreeSpace(sds s) {
  */
 size_t sdsAllocSize(sds s) {
     size_t alloc = sdsalloc(s);
-    return sdsHdrSize(s[-1])+alloc+1;
+    return sdsheadersize(s)+alloc+1;
 }
 
 /* Return the pointer of the actual SDS allocation (normally SDS strings
  * are referenced by the start of the string buffer). */
 void *sdsAllocPtr(sds s) {
-    return (void*) (s-sdsHdrSize(s[-1]));
+    return (void*) (s-sdsheadersize(s));
 }
 
 /* Increment the sds length and decrements the left free space at the
@@ -511,12 +499,12 @@ void *sdsAllocPtr(sds s) {
  * sdsIncrLen(s, nread);
  */
 void sdsIncrLen(sds s, int incr) {
-    unsigned char flags = s[-1];
+    char type=sdstype(s);
     size_t len;
-    switch(flags&SDS_TYPE_MASK) {
+    switch(type) {
         case SDS_TYPE_5: {
             unsigned char *fp = ((unsigned char*)s)-1;
-            unsigned char oldlen = SDS_TYPE_5_LEN(flags);
+            unsigned char oldlen = SDS_TYPE_5_LEN(s[-1]);
             assert((incr > 0 && oldlen+incr < 32) || (incr < 0 && oldlen >= (unsigned int)(-incr)));
             *fp = SDS_TYPE_5 | ((oldlen+incr) << SDS_TYPE_BITS);
             len = oldlen+incr;
@@ -579,11 +567,24 @@ sds sdscatlen(sds s, const void *t, size_t len) {
 
     s = sdsMakeRoomFor(s,len);
     if (s == NULL) return NULL;
-    s_memcpy(s+curlen, t, len);
     sdssetlen(s, curlen+len);
     s[curlen+len] = '\0';
+    s_memcpy(s+curlen, t, len);
     return s;
 }
+
+sds sdscatlen_total(sds s, const void *t, size_t len,size_t * total) {
+    size_t curlen = sdslen(s);
+
+    s = sdsMakeRoomFor(s,len);
+    if (s == NULL) return NULL;
+    sdssetlen(s, curlen+len);
+    s[curlen+len] = '\0';
+    s_memcpy(s+curlen, t, len);
+    *total=curlen+len;
+    return s;
+}
+
 
 /* Append the specified null termianted C string to the sds string 's'.
  *
