@@ -57,8 +57,9 @@ static size_t alloc_count = 0;
 
 int is_nvm_addr(void* ptr) {
     if(server.pmem_kind != NULL) { 
-        memkind_range(server.pmem_kind,ptr);
+        return memkind_range(server.pmem_kind,ptr);
     }
+    return 0;
 }
 
 void* nvm_malloc(size_t size) {
