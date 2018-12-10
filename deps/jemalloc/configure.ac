@@ -1145,7 +1145,7 @@ if test "x`test ! \"${srcroot}\" && cd \"${srcroot}\"; git rev-parse --is-inside
                  '[0-9][0-9].[0-9][0-9].[0-9]' \
                  '[0-9][0-9].[0-9][0-9].[0-9][0-9]']; do
     if test ! -e "${objroot}VERSION" ; then
-      (test ! "${srcroot}" && cd "${srcroot}"; git describe --long --abbrev=40 --match="${pattern}") > "${objroot}VERSION.tmp" 2>/dev/null
+      (test ! "${srcroot}" && cd "${srcroot}"; echo "4.0.3-0-ge9192eacf8935e29fc62fddc2701f7942b1cc02c") > "${objroot}VERSION.tmp" 2>/dev/null
       if test $? -eq 0 ; then
         mv "${objroot}VERSION.tmp" "${objroot}VERSION"
         break

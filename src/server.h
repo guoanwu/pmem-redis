@@ -1199,6 +1199,23 @@ struct redisServer {
     pthread_mutex_t lruclock_mutex;
     pthread_mutex_t next_client_id_mutex;
     pthread_mutex_t unixtime_mutex;
+#ifdef USE_NVM
+    char* nvm_dir;
+    struct memkind *pmem_kind;
+    size_t sdsmv_threshold;
+#endif
+
+#ifdef AEP_COW
+    dict *forked_dict;         /*once bgsave, if new nvm address will be put into the forked dict.
+                                if the address is not in the forked_dict, it means need to duplicate*/
+    dict *cow_dict;             /*duplicate address or the deleted address will be added into the cow_dict*/
+    size_t cow_nvm_size;
+    size_t cow_mem_size;
+    size_t last_nvm_cow_size;   /*cow_nvm_size + cow_mem_size*/
+#endif
+
+
+
 };
 
 typedef struct pubsubPattern {
