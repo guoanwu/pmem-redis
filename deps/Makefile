@@ -36,7 +36,10 @@ distclean:
 	-(cd hiredis && $(MAKE) clean) > /dev/null || true
 	-(cd linenoise && $(MAKE) clean) > /dev/null || true
 	-(cd lua && $(MAKE) clean) > /dev/null || true
-	-(cd jemalloc && [ -f Makefile ] && $(MAKE) distclean) > /dev/null || true
+	-(cd memkind/jemalloc/obj && $(MAKE) distclean) > /dev/null || true
+	-(cd memkind && $(MAKE) distclean) > /dev/null || true
+	-(cd jemalloc && $(MAKE) clean) > /dev/null || true
+	-(cd pmdk && $(MAKE) clobber) > /dev/null || true
 	-(rm -f .make-*)
 
 .PHONY: distclean
@@ -50,7 +53,6 @@ hiredis: .make-prerequisites
 linenoise: .make-prerequisites
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
 	cd linenoise && $(MAKE)
-
 .PHONY: linenoise
 
 ifeq ($(uname_S),SunOS)
@@ -72,12 +74,26 @@ lua: .make-prerequisites
 
 .PHONY: lua
 
-JEMALLOC_CFLAGS= -std=gnu99 -Wall -pipe -g3 -O3 -funroll-loops $(CFLAGS)
-JEMALLOC_LDFLAGS= $(LDFLAGS)
+pmdk: .make-prerequisites
+	./update-pmdk.sh
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	cd pmdk && $(MAKE)
+
+.PHONY: pmdk
+
+memkind: .make-prerequisites
+	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
+	./build-memkind.sh
+
+.PHONY: memkind
 
 jemalloc: .make-prerequisites
 	@printf '%b %b\n' $(MAKECOLOR)MAKE$(ENDCOLOR) $(BINCOLOR)$@$(ENDCOLOR)
-	cd jemalloc && ./configure --with-lg-quantum=3 --with-jemalloc-prefix=je_ --enable-cc-silence CFLAGS="$(JEMALLOC_CFLAGS)" LDFLAGS="$(JEMALLOC_LDFLAGS)"
-	cd jemalloc && $(MAKE) CFLAGS="$(JEMALLOC_CFLAGS)" LDFLAGS="$(JEMALLOC_LDFLAGS)" lib/libjemalloc.a
-
+#	cd jemalloc_JE/ && ./autogen.sh
+#	mkdir -p jemalloc_JE/obj
+	cd jemalloc && ./autogen.sh
+	cd jemalloc && ./configure --with-jemalloc-prefix=je_ --with-private-namespace=
+	cd jemalloc && make -j $(nproc)
+	
 .PHONY: jemalloc
+
